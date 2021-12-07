@@ -4,8 +4,9 @@
 #include <assert.h>
 #include <inttypes.h>
 #include <string.h>
+#include <malloc.h>
 
-typedef enum das_emu_op_e {
+typedef enum dasint_op_e {
 	op_nop		// nothing
 ,	op_ldwi		// load integer word into reg
 ,	op_lda		// load argument qword into reg
@@ -22,57 +23,102 @@ typedef enum das_emu_op_e {
 ,	op_jnewi	// if !flags CP+=WI;
 ,	op_loopwi	// R0--, if R0!=0 CP+=WI;
 ,	op_ret		// RESULT = R0
-} das_emu_op_t;
+} dasint_op_t;
+
+typedef struct dasint_code_s {
+	uint32_t *	code;
+	uint32_t *	cs;
+	size_t		capacity;
+} dasint_code_t;
 
 typedef int64_t (* call0_t)();
 typedef int64_t (* call1_t)(int64_t);
 
-int64_t das_eval ( uint32_t * cp, int64_t * ap );
+int64_t dasint_eval ( uint32_t * cp, int64_t * ap );
 
 #ifdef DASINT_IMPLEMENTATION
 
-void dasint_op_R0 ( uint32_t ** code, uint32_t op, uint32_t R0) {
-	**code = op | (R0<<8);	(*code) ++;
+void dasint_code_init ( dasint_code_t * ctx ) {
+	ctx->code = (uint32_t *) malloc(32*sizeof(uint32_t));
+	ctx->cs = ctx->code;
+	ctx->capacity = 32;
 }
 
-void dasint_op_R0_WI ( uint32_t ** code, uint32_t op, uint32_t R0, int16_t WI ) {
-	**code = op | (R0<<8) | (((uint32_t)WI)<<16);	(*code) ++;
+void dasint_code_free ( dasint_code_t * ctx ) {
+	free(ctx->code);
 }
 
-void dasint_op_R0_R1_BI ( uint32_t ** code, uint32_t op, uint32_t R0, uint32_t R1, int8_t BI ) {
-	**code = op | (R0<<8) | (R1<<16) | (((uint32_t)BI)<<24);	(*code) ++;
+uint32_t * dasint_code_reserve ( dasint_code_t * ctx, size_t dw ) {
+	uint32_t * ncs = ctx->cs + dw;
+	if ( (ncs - ctx->code) > ctx->capacity ) {
+		size_t nc1 = ctx->capacity * 2;
+		size_t nc2 = ctx->capacity + dw;
+		ctx->capacity = nc1 < nc2 ? nc2 : nc1;
+		uint32_t * ncode = realloc(ctx->code, ctx->capacity);
+		ctx->cs = ctx->cs - ctx->code + ncode;
+		ctx->code = ncode;
+		ncs = ctx->cs + dw;
+	}
+	uint32_t * ccs = ctx->cs;
+	ctx->cs = ncs;
+	return ccs;
 }
 
-void dasint_op_R0_R1 ( uint32_t ** code, uint32_t op, uint32_t R0, uint32_t R1 ) {
-	**code = op | (R0<<8) | (R1<<16);	(*code) ++;
+uint32_t * dasint_label ( dasint_code_t * ctx ) {
+	return ctx->cs;
 }
 
-void dasint_op_R0_FLOAT ( uint32_t ** code, uint32_t op, uint32_t R0, float f) {
-	**code = op | (R0<<8);	(*code) ++;
-	**((float**)code) = f;	(*code) ++;
+void dasint_op_R0 ( dasint_code_t * ctx, uint32_t op, uint32_t R0) {
+	uint32_t * code = dasint_code_reserve(ctx, 1);
+	*code = op | (R0<<8);
 }
 
-void dasint_op_R0_R1_ADDR ( uint32_t ** code, uint32_t op, uint32_t R0, uint32_t R1, void * addr ) {
-	**code = op | (R0<<8) | (R1<<16);	(*code) ++;
-	**((void ***)code) = addr;			(*code) += 2;		// todo: in 32 bit its *code++;
+void dasint_op_R0_WI ( dasint_code_t * ctx, uint32_t op, uint32_t R0, int16_t WI ) {
+	uint32_t * code = dasint_code_reserve(ctx, 1);
+	*code = op | (R0<<8) | (((uint32_t)WI)<<16);
 }
 
-void dasint_op_R0_R1_R2 ( uint32_t ** code, uint32_t op, uint32_t R0, uint32_t R1, uint32_t R2 ) {
-	**code = op | (R0<<8) | (R1<<16) | (R2<<24);	(*code) ++;
+void dasint_op_R0_FLOAT ( dasint_code_t * ctx, uint32_t op, uint32_t R0, float f) {
+	uint32_t * code = dasint_code_reserve(ctx, 2);
+	*code = op | (R0<<8);	code ++;
+	*((float*)code) = f;
 }
 
-void dasint_op_JUMP ( uint32_t ** code, uint32_t op, uint32_t * label ) {
-	ptrdiff_t diff = label - *code - 1;
+void dasint_op_R0_R1 ( dasint_code_t * ctx, uint32_t op, uint32_t R0, uint32_t R1 ) {
+	uint32_t * code = dasint_code_reserve(ctx, 1);
+	*code = op | (R0<<8) | (R1<<16);
+}
+
+void dasint_op_R0_R1_BI ( dasint_code_t * ctx, uint32_t op, uint32_t R0, uint32_t R1, int8_t BI ) {
+	uint32_t * code = dasint_code_reserve(ctx, 1);
+	*code = op | (R0<<8) | (R1<<16) | (((uint32_t)BI)<<24);
+}
+
+void dasint_op_R0_R1_ADDR ( dasint_code_t * ctx, uint32_t op, uint32_t R0, uint32_t R1, void * addr ) {
+	uint32_t * code = dasint_code_reserve(ctx, 3);
+	*code = op | (R0<<8) | (R1<<16);	code++;
+	*((void **)code) = addr;
+}
+
+void dasint_op_R0_R1_R2 ( dasint_code_t * ctx, uint32_t op, uint32_t R0, uint32_t R1, uint32_t R2 ) {
+	uint32_t * code = dasint_code_reserve(ctx, 1);
+	*code = op | (R0<<8) | (R1<<16) | (R2<<24);
+}
+
+void dasint_op_JUMP ( dasint_code_t * ctx, uint32_t op, uint32_t * label ) {
+	uint32_t * code = dasint_code_reserve(ctx, 1);
+	ptrdiff_t diff = label - code - 1;
 	assert ( diff<=INT16_MAX && diff>=INT16_MIN );
 	int16_t WI = diff;
-	**code = op | (((uint32_t)diff)<<16); (*code) ++;
+	*code = op | (((uint32_t)diff)<<16);
 }
 
-void dasint_op_R0_JUMP ( uint32_t ** code, uint32_t op, uint32_t R0, uint32_t * label ) {
-	ptrdiff_t diff = label - *code - 1;
+void dasint_op_R0_JUMP ( dasint_code_t * ctx, uint32_t op, uint32_t R0, uint32_t * label ) {
+	uint32_t * code = dasint_code_reserve(ctx, 1);
+	ptrdiff_t diff = label - code - 1;
 	assert ( diff<=INT16_MAX && diff>=INT16_MIN );
 	int16_t WI = diff;
-	**code = op | (R0<<8) | (((uint32_t)diff)<<16); (*code) ++;
+	*code = op | (R0<<8) | (((uint32_t)diff)<<16);
 }
 
 int64_t dasint_eval ( uint32_t * cp, int64_t * ap ) {
