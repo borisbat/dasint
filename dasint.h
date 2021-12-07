@@ -154,16 +154,16 @@ int64_t dasint_eval ( uint32_t * cp, int64_t * ap ) {
 			case op_ldwi:	r[R0] = WI;	break;
 			case op_lda:	r[R0] = ap[R1];	break;
 			case op_mov:	r[R0] = r[R1];	break;
-			case op_add:	r[R0] = r[R1] + r[R2];	break;
-			case op_addbi:	r[R0] = r[R1] + BI; break;
-			case op_subbi:	r[R0] = r[R1] - BI; break;
-			case op_cmp:	flags = r[R0] == r[R1];	break;
+			case op_add:	*((int32_t*)(r+R0)) = *((int32_t*)(r+R1)) + *((int32_t*)(r+R2)); break;
+			case op_addbi:	*((int32_t*)(r+R0)) = *((int32_t*)(r+R1)) + BI; break;
+			case op_subbi:	*((int32_t*)(r+R0)) = *((int32_t*)(r+R1)) - BI; break;
+			case op_cmp:	flags = *((int32_t*)(r+R0)) == *((int32_t*)(r+R1));	break;
 			case op_addf:	*((float*)(r+R0)) = *((float*)(r+R1)) + *((float*)(r+R2));	break;
 			case op_i2f:	*((float*)(r+R0)) = (float) r[R1]; break;
 			case op_call1:	{ call1_t c1 = *((void **)cp); cp += 2; r[R0] = (*c1)(r[R1]); }	break;
 			case op_jewi:	if (flags ) cp += WI; break;
 			case op_jnewi:	if (!flags ) cp += WI; break;
-			case op_loopwi:	if ( --(r[R0]) ) cp += WI; break;
+			case op_loopwi:	if ( -- *((int32_t*)(r+R0)) ) cp += WI; break;
 			case op_ret:	return r[R0];
 			default:
 				assert(0 && "unsupported instruction");
