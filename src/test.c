@@ -63,6 +63,8 @@ void test_fib() {
 	int FIBI = 6511134;
 	dasint_code_t ctx;
 	fib(&ctx);
+	printf("fib:\n");
+	dasint_disasm(&ctx);
 	int64_t res = 0;
 	int64_t rest = 0;
 	for ( int i=0; i!=20; ++i ) {
@@ -89,6 +91,8 @@ void test_extcall() {
 	float rest = 0;
 	dasint_code_t ctx;
 	extcall(&ctx);
+	printf("extcall:\n");
+	dasint_disasm(&ctx);
 	for ( int i=0; i!=20; ++i ) {
 		uint64_t args[1];
 		args[0] = 1000;
@@ -107,7 +111,7 @@ void test_extcall() {
 }
 
 int main(int argc, char **argv) {
-	// test_fib();
+	test_fib();
 	test_extcall();
 	return 0;
 }
